@@ -455,10 +455,11 @@ else
 		txt_setup=()
 		exec_options show_setup
 		RET=0
-		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --cancel-label "Reconfigurer" \
+		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --extra-button --extra-label "Reconfigurer" \
 			--menu "" 0 0 0 "${txt_setup[@]}"  2>&1 >/dev/tty)" || RET="$?"
 		case "$RET" in
 		0) break ;;
+		1) exit 1 ;;
 		esac
 	done
 	clear
