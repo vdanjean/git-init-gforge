@@ -316,6 +316,9 @@ runtest() {
 	else
 		out="$( echo "$input" | "$@" 2>&1 )" || RET="$?"
 	fi
+	case " $options " in
+	*\ warn-only\ *) test "$RET" = 0 || RET=255 ;;
+	esac
 	log_end_msg "$RET" || true
 	if test "$RET" != 0; then
 		case " $options " in
@@ -342,7 +345,7 @@ if test "$1" = "--debug"; then
 	exec_options set_default
 	
 	forge_gitroot=/home/users/vdanjean/
-	subdir=tmp
+	subdir=tmp/test
 	name=test
 	desc="yo"
 		case "$name" in
@@ -385,7 +388,7 @@ RET=0
 runtest \
 	name "Vérification de la disponibilité du répertoire cible" \
 	logvalue "$forge_gitroot/$subdir/." \
-	option allow-fail \
+	option "allow-fail warn-only" \
 	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$subdir/." \
 	|| RET="$?"
 
