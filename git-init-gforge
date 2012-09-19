@@ -84,7 +84,7 @@ exec_options() {
 			help "Exemples: papier pour la conférence RenPar 2012 sur les GPU" \
 			choice "input default nonnull" "Description du projet git" "" \
 		    || RET=$?  ;;
-		7) exec_option subdir \
+		7) exec_option forge_subdir \
 			string "Sous-répertoire pour le projet" \
 			help "Les gros projets (memo, ...) structurent les dépôts Git" \
 			help "dans une hiérarchie de répertoires" \
@@ -203,7 +203,7 @@ run_dialog() {
 			*\ input\ *)
 				inputentry="$count"
 				inputoptions="$2"
-				if ! test -z $tag; then 
+				if ! test -z "$tag"; then 
 					val="$input"
 					inputval="$input"
 				fi
@@ -228,10 +228,18 @@ run_dialog() {
 	# ESC => abort (1)
 	local RET
 	local C
-	C="$(
-	  env DIALOG_CANCEL=3 DIALOG_ERROR=255 DIALOG_ESC=1 DIALOG_HELP=2 DIALOG_OK=0 DIALOG_EXTRA=4 \
-	  dialog "${dopt[@]}" --menu "" 0 0 10 "${dchoice[@]}" 2>&1 >/dev/tty)"
-	RET="$?"
+	if test "$tag" = 0; then
+		C="$inputentry"
+		RET=0
+		tag="$inputentry"
+		inputval="$input"
+		eval "$varname"'_tag="$C"'
+	else
+		C="$(
+		  env DIALOG_CANCEL=3 DIALOG_ERROR=255 DIALOG_ESC=1 DIALOG_HELP=2 DIALOG_OK=0 DIALOG_EXTRA=4 \
+		  dialog "${dopt[@]}" --menu "" 0 0 10 "${dchoice[@]}" 2>&1 >/dev/tty)"
+		RET="$?"
+        fi
 	if [ "$RET" = 0 -a "$C" = "$inputentry" -a -z "$inputval" -a "$C" != "$tag" ]; then
 		RET=4
 	fi
@@ -296,6 +304,15 @@ echo_setup() {
 runtest() {
 	local name= logvalue= error= RET=0 options= input=
 	local out=
+	local dry_skip=
+	local dry_log=
+
+	echo2() { echo "# $2" ; }
+
+	if [ "$dry_run" = 1 ]; then
+		dry_skip="true"
+		dry_log=echo2
+	fi
 
 	while test "$#" != 0 ; do
 		case "$1" in
@@ -310,48 +327,120 @@ runtest() {
 		shift
 	done
 	
-	log_daemon_msg "$name" "$logvalue"
-	if [ -z "$input" ]; then
-		out="$( "$@" 2>&1 )" || RET="$?"
-	else
-		out="$( echo "$input" | "$@" 2>&1 )" || RET="$?"
-	fi
-	case " $options " in
-	*\ warn-only\ *) test "$RET" = 0 || RET=255 ;;
-	esac
-	log_end_msg "$RET" || true
-	if test "$RET" != 0; then
+	$dry_log log_daemon_msg "$name" "$logvalue"
+	if [ "$dry_run" = 1 ]; then
+		echo "$@"
 		case " $options " in
-		*\ silent\ *|*\ allow-fail\ *) ;;
-		*)
-			if [ -z "$input" ]; then
-				echo "CMD: $@"
-			else
-				echo "CMD: echo \"$input\" | $@"
-			fi
-			echo "$out"
-			echo
-			echo "ERREUR :"
-			echo -e "$error"
-			;;
+		*\ warn-only\ *) RET=255 ;;
 		esac
+	else
+		if [ -z "$input" ]; then
+			out="$( "$@" 2>&1 )" || RET="$?"
+		else
+			out="$( echo "$input" | "$@" 2>&1 )" || RET="$?"
+		fi
+		case " $options " in
+		*\ warn-only\ *) test "$RET" = 0 || RET=255 ;;
+		esac
+		$dry_skip log_end_msg "$RET" || true
+		if test "$RET" != 0; then
+			case " $options " in
+			*\ allow-fail\ *)
+				if ! test -z "$error"; then
+					echo
+					echo -e "$error"
+				fi
+				;;
+			*\ silent\ *) ;;
+			*)
+				if [ -z "$input" ]; then
+					echo "CMD: $@"
+				else
+					echo "CMD: echo \"$input\" | $@"
+				fi
+				echo "$out"
+				echo
+				echo "ERREUR :"
+				echo -e "$error"
+				;;
+			esac
+		fi
 	fi
 	return $RET
 }
+
+error() {
+	echo 1>&2 "$@"
+	exit 1
+}
+
+opt_help() {
+	local varname="$1"
+	local optname="${varname//_/-}"
+	local text="$3"
+
+	printf "\t--%-20s $text\n" "$optname value"
+}
+
+show_help() {
+	echo "Usage: $(basename $0) [options]"
+	echo "Options:"
+	printf "\t--%-20s This help\n" "help"
+	printf "\t-n|--%-17s Only show commands, do not execute them\n" "dry-run"
+	exec_options opt_help
+}
+
 #######################################################
 
+dry_run=
+debug=
+
+long_opts=
+compute_opts() {
+	local varname="$1"
+	local optname="${varname//_/-}"
+	test -z "$long_opts" || long_opts+=","
+	long_opts+="$optname:"
+}
+exec_options compute_opts
+
+
+TEMP=$(getopt -o hn --long help,dry-run,debug,$long_opts \
+     -n "$(basename $0)" -- "$@")
+eval set -- "$TEMP"
+
+while true; do
+	case "$1" in
+	-h|--help) show_help ; exit 0 ;;
+	-n|--dry-run) dry_run=1 ;;
+	--debug) debug=1 ;;
+	--) shift ; break ;;
+	--*)
+		optname="${1#--}"
+		varname="${optname//-/_}"
+		eval "$varname"='"$2"'
+		eval "$varname"_tag='0'
+		eval "$varname"_input='"$2"'
+		shift
+		;;
+	esac
+	shift
+done
+
+if test "$#" != 0 ; then
+	echo 1>&2 "trop d'argument à la commande"
+	show_help 1>&2
+	exit 1
+fi
+
 #exec_options display_all
-if test "$1" = "--debug"; then
+if test "$debug" = 1; then
 	exec_options set_default
 	
 	forge_gitroot=/home/users/vdanjean/
-	subdir=tmp/test
+	forge_subdir=tmp/test
 	name=test
 	desc="yo"
-		case "$name" in
-		*.git) ;;
-		*) name="$name.git" ;;
-		esac
 	
 	exec_options echo_setup
 else
@@ -387,9 +476,9 @@ runtest \
 RET=0
 runtest \
 	name "Vérification de la disponibilité du répertoire cible" \
-	logvalue "$forge_gitroot/$subdir/." \
+	logvalue "$forge_gitroot/$forge_subdir/." \
 	option "allow-fail warn-only" \
-	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$subdir/." \
+	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$forge_subdir/." \
 	|| RET="$?"
 
 if [ "$RET" != 0 ]; then
@@ -412,12 +501,12 @@ if [ "$RET" != 0 ]; then
 	
     runtest \
 	name "Création du répertoire cible" \
-	logvalue "$forge_gitroot/$subdir" \
-	error "Impossible de créer le répertoire '$forge_gitroot/$subdir'" \
-	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$subdir"
+	logvalue "$forge_gitroot/$forge_subdir" \
+	error "Impossible de créer le répertoire '$forge_gitroot/$forge_subdir'" \
+	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$forge_subdir"
 fi
 
-repo="$forge_gitroot/$subdir/$name"
+repo="$forge_gitroot/$forge_subdir/$name"
 
 runtest \
 	name "Vérification que le dépôt Git n'existe pas encore" \
