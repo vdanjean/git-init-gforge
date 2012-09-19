@@ -462,8 +462,13 @@ echo
 echo "Votre dépôt git est configuré"
 echo "Pour le remplir depuis un projet Git local, tapez les commandes suivantes :"
 echo
+echo "# Ajout du dépôt de la forge sous le nom 'origin'"
+echo "# (dépôt par défault pour les push/pull)"
 echo "git remote add origin ssh://$forge_login@$forge_hostname$repo"
-echo "git push origin master:master"
+echo "# Liaison entre la branche master locale et la branche master du dépôt"
+echo "# Ça permet de faire un simple 'git pull' par la suite"
 echo "git branch --set-upstream master origin/master"
+echo "# On envoie la branche locale 'master' sur la forge"
+echo "git push origin master:master"
 echo
 
