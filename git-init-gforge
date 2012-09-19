@@ -1,0 +1,540 @@
+#!/bin/bash
+
+set -e
+
+###########################################################
+xdg_setup() {
+	_XDG_PROJECT="$1"
+
+	XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+	XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+	XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share/:/usr/share/}"
+	XDG_CONFIG_DIRS="${XDG_CONFIG_DIRS:-/etc/xdg}"
+	XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+	XDG_CACHE_DIRS=""
+
+	export XDG_DATA_HOME
+	export XDG_CONFIG_HOME
+	export XDG_DATA_DIRS
+	export XDG_CONFIG_DIRS
+	export XDG_CACHE_HOME
+}
+
+_xdg_find() {
+	local KIND="$1"
+	local NAME="$2"
+	eval 'local LISTDIRS="${XDG_'"${KIND}"'_HOME}:${XDG_'"${KIND}"'_DIRS}"'
+	local save_IFS="$IFS"
+        IFS=":"
+	local found=
+        for dir in $LISTDIRS ; do
+		if test -e "$dir/$_XDG_PROJECT/$NAME" ; then
+			found="$dir/$_XDG_PROJECT/$NAME"
+			break
+		fi
+	done
+	IFS="$save_IFS"
+	echo "$found"
+}
+
+_xdg_openwrite() {
+	local KIND="$1"
+	local NAME="$2"
+	eval 'local DIR="${XDG_'"${KIND}"'_HOME}"'
+	local save_IFS="$IFS"
+        IFS=":"
+	test -d "$DIR/$_XDG_PROJECT" || mkdir -p "$DIR/$_XDG_PROJECT"
+	echo "$dir/$_XDG_PROJECT/$NAME"
+}
+
+xdg_find_config() {
+  _xdg_find CONFIG "$1"
+}
+
+xdg_find_data() {
+  _xdg_find DATA "$1"
+}
+
+xdg_find_cache() {
+  _xdg_find CACHE "$1"
+}
+
+xdg_openwrite_config() {
+  _xdg_openwrite CONFIG "$1"
+}
+
+xdg_openwrite_data() {
+  _xdg_openwrite DATA "$1"
+}
+
+xdg_openwrite_cache() {
+  _xdg_openwrite CACHE "$1"
+}
+
+###########################################################
+
+PACKAGE=git-init-gforge
+
+xdg_setup "$PACKAGE"
+
+cf=$(xdg_find_config git-init-gforge.sh)
+
+if test -r "$cf" ; then
+	. "$cf"
+fi
+
+exec_options() {
+	local next=1
+	local RET
+	local funcname="$1"
+
+	exec_option() {
+		eval "$funcname" '"$@"'
+	} 
+
+	while test "$next" != 8; do
+		RET=0
+		case "$next" in
+		0) ;;
+		1) exec_option forge_hostname \
+			string "Forge à utiliser" \
+			help "Indiquer le nom de la machine de la forge accessible par SSH" \
+			choice default "GForge Inria" shell.gforge.inria.fr \
+			choice "input nonnull" "Autre" "" \
+		    || RET=$?  ;;	
+		2) exec_option forge_login \
+			string "Login à utiliser pour accéder à la forge" \
+			choice default "Current login" "$LOGNAME" \
+			choice "input nonnull" "Autre" "" \
+		    || RET=$?  ;;
+		3) exec_option forge_project \
+			string "Nom du projet de la forge dans lequel créer le dépôt git" \
+			choice default "Memo (accès réservé aux membres du bâtiment de Montbonnot)" memo \
+			choice "" "Moais (accès réservé aux membres de Moais + invités)" moais \
+			choice "" "Mescal (accès réservé aux membres de Mescal + invités)" mescal \
+			choice "input nonnull" "Autre" "" \
+		    || RET=$?  ;;
+		4) exec_option forge_gitroot \
+			string "Chemin vers le répertoire racine des dépôts Git sur la forge" \
+			choice default "GitRoot du projet choisi" "/gitroot/$forge_project" \
+			choice "input nonnull" "Autre" "" \
+		    || RET=$?  ;;
+		5) exec_option name \
+			string "Nom du dépôt Git à créer" \
+			help "Préfixez le nom par la date (au moins l'année)" \
+			help "pour des projets localisés dans le temps" \
+			help "." \
+			help "Exemples: 2012_RenPar, 2012_RenPar_GPU, ..." \
+			choice "input default nonnull" "Nom du projet git" "" \
+		    || RET=$?  ;;
+		6) exec_option desc \
+			string "Description rapide du dépôt Git à créer" \
+			help "Une ligne maximum" \
+			help "." \
+			help "Exemples: papier pour la conférence RenPar 2012 sur les GPU" \
+			choice "input default nonnull" "Description du projet git" "" \
+		    || RET=$?  ;;
+		7) exec_option subdir \
+			string "Sous-répertoire pour le projet" \
+			help "Les gros projets (memo, ...) structurent les dépôts Git" \
+			help "dans une hiérarchie de répertoires" \
+			help "N'hésitez pas à proposer d'améliorer cette hiérarchie" \
+			choice "default" "Articles de conférences, ..." papers/articles \
+			choice "" "Rapport de master, thèses, ..." papers/master_reports \
+			choice "" "Appels à projets, délivrables texte, ..." papers/projects \
+			choice "" "Chapitres de livres" papers/book_chapters \
+			choice "" "Livres" papers/books \
+			choice "" "Résultats d'expériences" software/expe \
+			choice "" "Outils logiciels" software/tools \
+			choice input "Autre" "" \
+		    || RET=$?  ;;
+		esac
+		case "$RET" in
+		10) next=$(( $next - 1 )) ;;
+		20) ;;
+		0) next=$(( $next + 1 )) ;;
+		1) return 1 ;;
+		*) error arghhh ;;
+		esac
+	done
+}
+
+display_all() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	shift; shift; shift
+	echo "#########################"
+	echo "$vaname ($vartype): $text"
+	while test "$#" != 0; do
+		case "$1" in
+		help) 
+			echo "  $2"
+			shift;;
+		choice)
+			echo "* $4: $3";
+			shift; shift; shift;;
+		*)
+			error problem;;
+		esac
+		shift
+	done
+}
+
+set_default() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	shift; shift; shift
+	while test "$#" != 0; do
+		case "$1" in
+		help) 
+			shift;;
+		choice)
+			case " $2 " in
+			*\ default\ *)
+				eval "$varname"'="$4"'
+				return
+				;;
+			esac
+			shift; shift; shift;;
+		*)
+			error problem;;
+		esac
+		shift
+	done
+}
+
+run_dialog() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	local help_txt=""
+	local has_help=
+	local has_input=
+	local count=1
+	local val=
+	local inputentry=
+	local inputoptions=
+	local inputval=
+	eval local tag='"$'"$varname"'_tag"'
+	eval local input='"$'"$varname"'_input"'
+	declare -a dopt
+	declare -a dchoice
+	declare -a choices
+	dopt=( --title "$3" --cancel-label "Précédent" --extra-button --extra-label "Éditer" )
+	dhelp=()
+	dchoice=()
+	choices=()
+	shift; shift; shift
+	while test "$#" != 0; do
+		case "$1" in
+		help)
+			if test -z "$has_help" ; then
+				has_help=1
+				dopt+=(--help-button)
+			fi
+			case "$2" in
+			".") help_txt+="\n" ;;
+			*) help_txt+="$2 " ;;
+			esac
+			shift;;
+		choice)
+			val="$4"
+			case " $2 " in
+			*\ default\ *)
+				if test -z $tag; then 
+					dopt+=('--default-item' "$count")
+				fi
+				;;
+			esac
+			case " $2 " in
+			*\ input\ *)
+				inputentry="$count"
+				inputoptions="$2"
+				if ! test -z $tag; then 
+					val="$input"
+					inputval="$input"
+				fi
+				;;
+			esac
+			if test "$tag" = "$count" ; then
+				dopt+=('--default-item' "$count")
+			fi
+			dchoice+=("$count" "$3 [$val]")
+			choices+=("$val")
+			count=$(($count + 1))
+			shift; shift; shift;;
+		*)
+			error problem;;
+		esac
+		shift
+	done
+	# cancel => Précédent (3)
+	# help => Aide (2)
+	# ok => Accepter (0)
+	# extra => Éditer (4)
+	# ESC => abort (1)
+	local RET
+	local C
+	C="$(
+	  env DIALOG_CANCEL=3 DIALOG_ERROR=255 DIALOG_ESC=1 DIALOG_HELP=2 DIALOG_OK=0 DIALOG_EXTRA=4 \
+	  dialog "${dopt[@]}" --menu "" 0 0 10 "${dchoice[@]}" 2>&1 >/dev/tty)"
+	RET="$?"
+	if [ "$RET" = 0 -a "$C" = "$inputentry" -a -z "$inputval" -a "$C" != "$tag" ]; then
+		RET=4
+	fi
+	case "$RET" in
+	0) 
+		if test "$C" = "$inputentry" ; then
+			val="$inputval"
+			case " $inputoptions " in
+			*\ nonnull\ *)
+				if test -z "$val" ; then
+					dialog --title "ERREUR : $text" --ok-label "Retour" --msgbox \
+						"Une valeur vide n'est pas autorisée ici" 0 0
+					return 20
+				fi ;;
+			esac
+		else
+			val=$(( $C - 1 ))
+			val="${choices[$val]}"
+		fi
+		eval "$varname"'="$val"'
+		eval "$varname"'_tag="$C"'
+		if ! test -z "$inputentry"; then
+			eval "$varname"'_input="$inputval"'
+		fi
+	  ;;
+	1) return 1 ;; 
+	3) return 10 ;;
+	4)
+		C="$(dialog --title "$text" --inputbox "$help_txt" 0 0 "$inputval" 2>&1 >/dev/tty)"
+		RET="$?"
+		case "$RET" in
+		0)	inputval="$C"
+			eval "$varname"'_tag="$inputentry"'
+			eval "$varname"'_input="$inputval"'
+			;;
+		esac
+		return 20 ;;
+	2) dialog --title "$text" --ok-label "Retour" --msgbox "$help_txt" 0 0
+	   return 20 ;;
+	*) error argh ;;
+	esac
+}
+
+show_setup() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	eval local val='"$'"$varname"'"'
+	txt_setup+=("$val" "$text")
+
+}
+
+echo_setup() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	eval local val='"$'"$varname"'"'
+	echo "$varname = '$val'"
+
+}
+
+#exec_options display_all
+if false; then
+	exec_options set_default
+	
+	forge_gitroot=/home/users/vdanjean/
+	subdir=tmp
+	name=test
+	desc="yo"
+		case "$name" in
+		*.git) ;;
+		*) name="$name.git" ;;
+		esac
+	
+	exec_options echo_setup
+else
+
+	declare -a txt_setup
+	while : ; do
+		exec_options run_dialog
+		case "$name" in
+		*.git) ;;
+		*) name="$name.git" ;;
+		esac
+		txt_setup=()
+		exec_options show_setup
+		RET=0
+		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --cancel-label "Reconfigurer" \
+			--menu "" 0 0 0 "${txt_setup[@]}"  2>&1 >/dev/tty)" || RET="$?"
+		case "$RET" in
+		0) break ;;
+		esac
+	done
+	clear
+
+fi
+
+if [ -f /lib/lsb/init-functions ]; then
+         . /lib/lsb/init-functions
+else
+         log_warning_msg () {
+            echo "${@}."
+         }
+
+         log_success_msg () {
+            echo "${@}."
+         }
+
+         log_daemon_msg () {
+            echo -n "${1}: $2"
+         }
+
+         log_end_msg () {
+            if [ $1 -eq 0 ]; then
+              echo "."
+            elif [ $1 -eq 255 ]; then
+              /bin/echo -e " (warning)."
+            else
+              /bin/echo -e " failed!"
+            fi
+         }
+fi
+
+runtest() {
+	local name= logvalue= error= RET=0 options= input=
+	local out=
+
+	while test "$#" != 0 ; do
+		case "$1" in
+		name) name="$2"; shift ;;
+		logvalue) logvalue="$2"; shift;;
+		error) error+="$2\n"; shift;;
+		input) input+="$2"; shift;;
+		option) options+="$2 "; shift;;
+		cmd) shift ; break ;;
+		*) error pb ;;
+		esac
+		shift
+	done
+	
+	log_daemon_msg "$name" "$logvalue"
+	if [ -z "$input" ]; then
+		out="$( "$@" 2>&1 )" || RET="$?"
+	else
+		out="$( echo "$input" | "$@" 2>&1 )" || RET="$?"
+	fi
+	log_end_msg "$RET" || true
+	if test "$RET" != 0; then
+		case " $options " in
+		*\ silent\ *|*\ allow-fail\ *) ;;
+		*)
+			if [ -z "$input" ]; then
+				echo "CMD: $@"
+			else
+				echo "CMD: echo \"$input\" | $@"
+			fi
+			echo "$out"
+			echo
+			echo "ERREUR :"
+			echo -e "$error"
+			;;
+		esac
+	fi
+	return $RET
+}
+
+runtest \
+	name "Tentative de connexion SSH à la forge" \
+	logvalue "$forge_hostname" \
+	error "Impossible de se connecter par SSH à la forge" \
+	error "login : $forge_login" \
+	error "machine : $forge_hostname" \
+	cmd ssh "$forge_login@$forge_hostname" true
+
+RET=0
+runtest \
+	name "Vérification de la disponibilité du répertoire cible" \
+	logvalue "$forge_gitroot/$subdir/." \
+	option allow-fail \
+	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$subdir/." \
+	|| RET="$?"
+
+if [ "$RET" != 0 ]; then
+    runtest \
+	name "Vérification de la présence du répertoire racine des dépôts Git" \
+	logvalue "$forge_gitroot" \
+	error "Le répertoire '$forge_gitroot' n'existe pas." \
+	error "Contactez l'administrateur du projet $forge_project" \
+	error "ou configurez un autre répertoire de base" \
+	cmd ssh "$forge_login@$forge_hostname" test -d "$forge_gitroot"
+	
+    runtest \
+	name "Test d'écriture dans répertoire racine des dépôts Git" \
+	logvalue "$forge_gitroot" \
+	error "Le répertoire '$forge_gitroot' est protégé en écriture." \
+	error "Contactez l'administrateur du projet $forge_project" \
+	error "pour être inclus dans le projet $forge_project" \
+	error "ou configurez un autre répertoire de base" \
+	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot"
+	
+    runtest \
+	name "Création du répertoire cible" \
+	logvalue "$forge_gitroot/$subdir" \
+	error "Impossible de créer le répertoire '$forge_gitroot/$subdir'" \
+	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$subdir"
+fi
+
+repo="$forge_gitroot/$subdir/$name"
+
+runtest \
+	name "Vérification que le dépôt Git n'existe pas encore" \
+	logvalue "$name" \
+	error "Le dépôt '$name' existe déjà" \
+	cmd ssh "$forge_login@$forge_hostname" test ! -d "$repo"
+
+runtest \
+	name "Création du dépôt Git" \
+	logvalue "$name" \
+	error "Impossible de créer le dépôt '$name'" \
+	cmd ssh "$forge_login@$forge_hostname" mkdir "$repo"
+
+runtest \
+	name "Initialisation du dépôt Git" \
+	logvalue "$name" \
+	error "Impossible d'initialiser le dépôt '$name'" \
+	cmd ssh "$forge_login@$forge_hostname" env GIT_DIR="$repo" git init-db --shared
+
+runtest \
+	name "Configuration de la description du dépôt Git" \
+	logvalue "$name" \
+	error "Impossible de mettre en place la description du dépôt '$name'" \
+	input "$desc" \
+	cmd ssh "$forge_login@$forge_hostname" bash -c 'cat > "'"$repo/description"'"'
+
+runtest \
+	name "Installation du crochet pour l'accès HTTP" \
+	logvalue "post-update" \
+	error "Impossible de mettre en place le crochet 'post-update'" \
+	input "$desc" \
+	cmd ssh "$forge_login@$forge_hostname" mv -v "$repo/hooks/post-update".sample "$repo/hooks/post-update"
+
+runtest \
+	name "Correction des permissions du crochet post-update" \
+	logvalue "" \
+	error "Impossible de positionner les permissions du crochet 'post-update'" \
+	input "$desc" \
+	cmd ssh "$forge_login@$forge_hostname" chmod +x "$repo/hooks/post-update"
+
+echo 
+echo "Votre dépôt git est configuré"
+echo "Pour le remplir depuis un projet Git local, tapez les commandes suivantes :"
+echo
+echo "git remote add origin ssh://$forge_login@$forge_hostname$repo"
+echo "git push origin master:master"
+echo "git branch --set-upstream master origin/master"
+echo
+
