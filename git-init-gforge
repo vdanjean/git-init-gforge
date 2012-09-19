@@ -1,7 +1,38 @@
 #!/bin/bash
 
+#######################################################
+# LSB
+
+if [ -f /lib/lsb/init-functions ]; then
+         . /lib/lsb/init-functions
+else
+         log_warning_msg () {
+            echo "${@}."
+         }
+
+         log_success_msg () {
+            echo "${@}."
+         }
+
+         log_daemon_msg () {
+            echo -n "${1}: $2"
+         }
+
+         log_end_msg () {
+            if [ $1 -eq 0 ]; then
+              echo "."
+            elif [ $1 -eq 255 ]; then
+              /bin/echo -e " (warning)."
+            else
+              /bin/echo -e " failed!"
+            fi
+         }
+fi
+#######################################################
+
 set -e
 
+#######################################################
 exec_options() {
 	local next=1
 	local RET
@@ -77,6 +108,7 @@ exec_options() {
 		esac
 	done
 }
+#######################################################
 
 display_all() {
 	local varname="$1"
@@ -261,68 +293,6 @@ echo_setup() {
 
 }
 
-#exec_options display_all
-if false; then
-	exec_options set_default
-	
-	forge_gitroot=/home/users/vdanjean/
-	subdir=tmp
-	name=test
-	desc="yo"
-		case "$name" in
-		*.git) ;;
-		*) name="$name.git" ;;
-		esac
-	
-	exec_options echo_setup
-else
-
-	declare -a txt_setup
-	while : ; do
-		exec_options run_dialog
-		case "$name" in
-		*.git) ;;
-		*) name="$name.git" ;;
-		esac
-		txt_setup=()
-		exec_options show_setup
-		RET=0
-		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --cancel-label "Reconfigurer" \
-			--menu "" 0 0 0 "${txt_setup[@]}"  2>&1 >/dev/tty)" || RET="$?"
-		case "$RET" in
-		0) break ;;
-		esac
-	done
-	clear
-
-fi
-
-if [ -f /lib/lsb/init-functions ]; then
-         . /lib/lsb/init-functions
-else
-         log_warning_msg () {
-            echo "${@}."
-         }
-
-         log_success_msg () {
-            echo "${@}."
-         }
-
-         log_daemon_msg () {
-            echo -n "${1}: $2"
-         }
-
-         log_end_msg () {
-            if [ $1 -eq 0 ]; then
-              echo "."
-            elif [ $1 -eq 255 ]; then
-              /bin/echo -e " (warning)."
-            else
-              /bin/echo -e " failed!"
-            fi
-         }
-fi
-
 runtest() {
 	local name= logvalue= error= RET=0 options= input=
 	local out=
@@ -365,6 +335,43 @@ runtest() {
 	fi
 	return $RET
 }
+#######################################################
+
+#exec_options display_all
+if test "$1" = "--debug"; then
+	exec_options set_default
+	
+	forge_gitroot=/home/users/vdanjean/
+	subdir=tmp
+	name=test
+	desc="yo"
+		case "$name" in
+		*.git) ;;
+		*) name="$name.git" ;;
+		esac
+	
+	exec_options echo_setup
+else
+
+	declare -a txt_setup
+	while : ; do
+		exec_options run_dialog
+		case "$name" in
+		*.git) ;;
+		*) name="$name.git" ;;
+		esac
+		txt_setup=()
+		exec_options show_setup
+		RET=0
+		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --cancel-label "Reconfigurer" \
+			--menu "" 0 0 0 "${txt_setup[@]}"  2>&1 >/dev/tty)" || RET="$?"
+		case "$RET" in
+		0) break ;;
+		esac
+	done
+	clear
+
+fi
 
 runtest \
 	name "Tentative de connexion SSH à la forge" \
