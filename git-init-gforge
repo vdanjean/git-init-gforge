@@ -37,6 +37,7 @@ exec_options() {
 	local next=1
 	local RET
 	local funcname="$1"
+	declare -a opts
 
 	exec_option() {
 		eval "$funcname" '"$@"'
@@ -50,6 +51,8 @@ exec_options() {
 			string "Forge à utiliser" \
 			help "Indiquer le nom de la machine de la forge accessible par SSH" \
 			choice default "GForge Inria" shell.gforge.inria.fr \
+			choice default "Forge IMAG" shell.forge.imag.fr \
+			choice default "LIG Forge (dépréciée)" ligforge.imag.fr \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;	
 		2) exec_option forge_login \
@@ -57,16 +60,34 @@ exec_options() {
 			choice default "Current login" "$LOGNAME" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
-		3) exec_option forge_project \
-			string "Nom du projet de la forge dans lequel créer le dépôt git" \
+		3) opts=()
+		   case "$forge_hostname" in
+		   *gforge.inria.fr)
+		      opts=(
 			choice default "Memo (accès réservé aux membres du bâtiment de Montbonnot)" memo \
 			choice "" "Moais (accès réservé aux membres de Moais + invités)" moais \
 			choice "" "Mescal (accès réservé aux membres de Mescal + invités)" mescal \
+		      ) ;;
+		   esac
+		   exec_option forge_project \
+			string "Nom du projet de la forge dans lequel créer le dépôt git" \
+			"${opts[@]}" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
-		4) exec_option forge_gitroot \
-			string "Chemin vers le répertoire racine des dépôts Git sur la forge" \
+		4) opts=()
+		   case "$forge_hostname" in
+		   *.forge.imag.fr)
+		      opts=(
+			choice default "GitRoot du projet choisi" "/scmrepos/git/$forge_project" \
+		      ) ;;
+		   *)
+		      opts=(
 			choice default "GitRoot du projet choisi" "/gitroot/$forge_project" \
+		      ) ;;
+		   esac
+		   exec_option forge_gitroot \
+			string "Chemin vers le répertoire racine des dépôts Git sur la forge" \
+			"${opts[@]}" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
 		5) exec_option name \
@@ -521,11 +542,35 @@ runtest \
 	error "Impossible de créer le dépôt '$name'" \
 	cmd ssh "$forge_login@$forge_hostname" mkdir "$repo"
 
+RET=0
 runtest \
 	name "Initialisation du dépôt Git" \
 	logvalue "$name" \
-	error "Impossible d'initialiser le dépôt '$name'" \
-	cmd ssh "$forge_login@$forge_hostname" env GIT_DIR="$repo" git init-db --shared
+	option "allow-fail" \
+	error "Impossible d'initialiser le dépôt '$name' à distance" \
+	error "On va essayer de le faire localement puis de le transférer" \
+	cmd ssh "$forge_login@$forge_hostname" env GIT_DIR="$repo" git init-db --shared \
+	|| RET="$?"
+if [ "$RET" != 0 ]; then
+    RET=0
+    REP="$(mktemp -d)"
+    mkdir "$REP/$name"
+    runtest \
+	name "Création du dépôt localement" \
+	logvalue "$REP/$name" \
+	option "allow-fail warn-only" \
+	error "Impossible d'initialiser le dépôt '$REP/$name'" \
+	cmd env GIT_DIR="$REP/$name" git init-db --shared
+
+    runtest \
+	name "Transfert du dépôt git sur la forge" \
+	logvalue "$name" \
+	option "allow-fail" \
+	error "Impossible de transférer le dépôt '$REP/$name'" \
+	cmd scp -r "$REP/$name/." "$forge_login@$forge_hostname:$repo/." 
+
+    rm -fr "$REP"
+fi
 
 runtest \
 	name "Configuration de la description du dépôt Git" \
@@ -537,9 +582,12 @@ runtest \
 runtest \
 	name "Installation du crochet pour l'accès HTTP" \
 	logvalue "post-update" \
+	option "allow-fail warn-only" \
 	error "Impossible de mettre en place le crochet 'post-update'" \
+	error "On suppose qu'il est déjà correctement nommé" \
 	input "$desc" \
-	cmd ssh "$forge_login@$forge_hostname" mv -v "$repo/hooks/post-update".sample "$repo/hooks/post-update"
+	cmd ssh "$forge_login@$forge_hostname" mv "$repo/hooks/post-update".sample "$repo/hooks/post-update" \
+	|| true
 
 runtest \
 	name "Correction des permissions du crochet post-update" \
