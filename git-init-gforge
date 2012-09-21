@@ -434,11 +434,14 @@ opt_help() {
 }
 
 show_help() {
-	echo "Usage: $(basename $0) [options]"
+	echo "Utilisation: $(basename $0) [options]"
 	echo "Options:"
-	printf "\t--%-20s This help\n" "help"
-	printf "\t-n|--%-17s Only show commands, do not execute them\n" "dry-run"
+	printf "\t--%-20s Cette aide\n" "help"
+	printf "\t-n|--%-17s Montre juste les commandes sans les exécuter\n" "dry-run"
 	exec_options opt_help
+	echo
+	echo "Sans option, le programme est interractif et propose des valeurs"
+	echo "par défaut raisonnables (en particulier pour écrire un papier)"
 }
 
 #######################################################
