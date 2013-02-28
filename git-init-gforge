@@ -58,11 +58,18 @@ exec_options() {
 		eval "$funcname" '"$@"'
 	} 
 
-	while test "$next" != 8; do
+	while test "$next" != 9; do
 		RET=0
 		case "$next" in
 		0) ;;
-		1) exec_option forge_hostname \
+		1) exec_option action \
+			string "Action à effectuer" \
+			help "Que faire ?" \
+			choice "" "Lister les dépôts Git existants" list \
+			choice default "Créer un nouveau dépôt Git" create \
+			choice "" "Simuler la création d'un nouveau dépôt Git" simulate \
+		    || RET=$?  ;;	
+		2) exec_option forge_hostname \
 			string "Forge à utiliser" \
 			help "Indiquer le nom de la machine de la forge accessible par SSH" \
 			help "." \
@@ -73,15 +80,17 @@ exec_options() {
 			choice "" "LIG Forge (dépréciée)" ligforge.imag.fr \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;	
-		2) exec_option forge_login \
+		3) exec_option forge_login \
 			string "Login à utiliser pour accéder à la forge" \
 			choice default "Current login" "$LOGNAME" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
-		3) opts=()
+		4) opts=(
+		     choice "" "Compte utilisateur (pas de rattachement à un projet particulier)" user \
+		   )
 		   case "$forge_hostname" in
 		   *gforge.inria.fr)
-		      opts=(
+		      opts=( "${opts[@]}" \
 			choice default "Memo (accès réservé aux membres du bâtiment de Montbonnot)" memo \
 			choice "" "Moais (accès réservé aux membres de Moais + invités)" moais \
 			choice "" "Mescal (accès réservé aux membres de Mescal + invités)" mescal \
@@ -92,16 +101,22 @@ exec_options() {
 			"${opts[@]}" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
-		4) opts=()
-		   case "$forge_hostname" in
-		   *.forge.imag.fr)
-		      opts=(
-			choice default "GitRoot du projet choisi" "/scmrepos/git/$forge_project" \
-		      ) ;;
-		   *)
-		      opts=(
-			choice default "GitRoot du projet choisi" "/gitroot/$forge_project" \
-		      ) ;;
+		5) opts=()
+		   case "$forge_project" in
+		   user)
+		     opts=(
+		       choice default "GitRoot du compte personnel" "\$HOME/public_git" \
+		     ) ;;
+		   *) case "$forge_hostname" in
+		      *.forge.imag.fr)
+			 opts=(
+			   choice default "GitRoot du projet choisi" "/scmrepos/git/$forge_project" \
+			 ) ;;
+		      *)
+			 opts=(
+			   choice default "GitRoot du projet choisi" "/gitroot/$forge_project" \
+			 ) ;;
+		      esac ;;
 		   esac
 		   exec_option forge_gitroot \
 			string "Chemin vers le répertoire racine des dépôts Git sur la forge" \
@@ -111,7 +126,7 @@ exec_options() {
 			"${opts[@]}" \
 			choice "input nonnull" "Autre" "" \
 		    || RET=$?  ;;
-		5) exec_option name \
+		6) exec_option name \
 			string "Nom du dépôt Git à créer" \
 			help "Préfixez le nom par la date (au moins l'année)" \
 			help "pour des projets localisés dans le temps" \
@@ -119,14 +134,14 @@ exec_options() {
 			help "Exemples: 2012_RenPar, 2012_RenPar_GPU, ..." \
 			choice "input default nonnull" "Nom du projet git" "" \
 		    || RET=$?  ;;
-		6) exec_option desc \
+		7) exec_option desc \
 			string "Description rapide du dépôt Git à créer" \
 			help "Une ligne maximum" \
 			help "." \
 			help "Exemples: papier pour la conférence RenPar 2012 sur les GPU" \
 			choice "input default nonnull" "Description du projet git" "" \
 		    || RET=$?  ;;
-		7) case "$forge_hostname,$forge_project" in
+		8) case "$forge_hostname,$forge_project" in
 		   *gforge.inria.fr,moais|*gforge.inria.fr,memo|*gforge.inria.fr,mescal)
 			opt1=default
 			opt2="" ;;
@@ -153,7 +168,11 @@ exec_options() {
 		case "$RET" in
 		10) next=$(( $next - 1 )) ;;
 		20) ;;
-		0) next=$(( $next + 1 )) ;;
+		0) next=$(( $next + 1 ))
+		   if test $next = 6 -a $action = list ; then
+		     next=$(( $next + 3 ))
+		   fi
+		   ;;
 		1) return 1 ;;
 		*) error arghhh ;;
 		esac
@@ -415,6 +434,12 @@ runtest() {
 				echo -e "$error"
 				;;
 			esac
+		else
+			case " $options " in
+			*\ print\ *)
+				echo
+				echo "$out"
+			esac
 		fi
 	fi
 	return $RET
@@ -434,8 +459,8 @@ opt_help() {
 }
 
 show_help() {
-	echo "Utilisation: $(basename $0) [options]"
-	echo "Options:"
+	echo "Utilisation : $(basename $0) [options]"
+	echo "Options :"
 	printf "\t--%-20s Cette aide\n" "help"
 	printf "\t-n|--%-17s Montre juste les commandes sans les exécuter\n" "dry-run"
 	exec_options opt_help
@@ -508,8 +533,14 @@ else
 		esac
 		txt_setup=()
 		exec_options show_setup
+		case "$action" in
+		"create") acname="Créer le dépôt" ;;
+		"simulate") acname="Simuler une création"
+			    dry_run=1 ;;
+		"list") acname="Lister les dépôts" ;;
+		esac
 		RET=0
-		C="$(dialog --title "Résumé des choix" --ok-label "Créer le dépôt" --extra-button --extra-label "Reconfigurer" \
+		C="$(dialog --title "Résumé des choix" --ok-label "$acname" --extra-button --extra-label "Reconfigurer" \
 			--menu "" 0 0 0 "${txt_setup[@]}"  2>&1 >/dev/tty)" || RET="$?"
 		case "$RET" in
 		0) break ;;
@@ -521,7 +552,7 @@ else
 fi
 
 runtest \
-	name "Tentative de connexion SSH à la forge" \
+	name "Tentative de connexion SSH à la forge " \
 	logvalue "$forge_hostname" \
 	error "Impossible de se connecter par SSH à la forge" \
 	error "login : $forge_login" \
@@ -529,9 +560,36 @@ runtest \
 	error "Vérifiez les paramètres de connexion et vos clés SSH" \
 	cmd ssh "$forge_login@$forge_hostname" true
 
+if [ $action = list ]; then
+    runtest \
+	name "Vérification de la présence du répertoire racine des dépôts Git " \
+	logvalue "$forge_gitroot" \
+	error "Le répertoire '$forge_gitroot' n'existe pas." \
+	error "Contactez l'administrateur du projet $forge_project" \
+	error "ou configurez un autre répertoire de base" \
+	cmd ssh "$forge_login@$forge_hostname" test -d "$forge_gitroot"
+
+    runtest \
+	name "Liste des dépôts git disponibles dans " \
+	logvalue "$forge_gitroot" \
+	option "print" \
+	cmd ssh "$forge_login@$forge_hostname" find "$forge_gitroot" -type d -name *.git \
+		-printf "'\n%p\n'" -exec sed "'s/^/  /'" {}/description '\;' -prune
+
+    echo
+    echo "Vous pouvez probablement obtenir un clone de ces dépôts avec la"
+    echo "commande suivant (en remplaçant [depot] par une des lignes listées"
+    echo "ci-dessus)"
+    echo
+    echo "git clone git+ssh://$forge_login@$forge_hostname/[depot]"
+    echo
+
+    exit 0
+fi
+
 RET=0
 runtest \
-	name "Vérification de la disponibilité du répertoire cible" \
+	name "Vérification de la disponibilité du répertoire cible " \
 	logvalue "$forge_gitroot/$forge_subdir/." \
 	option "allow-fail warn-only" \
 	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$forge_subdir/." \
@@ -539,7 +597,7 @@ runtest \
 
 if [ "$RET" != 0 ]; then
     runtest \
-	name "Vérification de la présence du répertoire racine des dépôts Git" \
+	name "Vérification de la présence du répertoire racine des dépôts Git " \
 	logvalue "$forge_gitroot" \
 	error "Le répertoire '$forge_gitroot' n'existe pas." \
 	error "Contactez l'administrateur du projet $forge_project" \
@@ -547,7 +605,7 @@ if [ "$RET" != 0 ]; then
 	cmd ssh "$forge_login@$forge_hostname" test -d "$forge_gitroot"
 	
     runtest \
-	name "Test d'écriture dans le répertoire racine des dépôts Git" \
+	name "Test d'écriture dans le répertoire racine des dépôts Git " \
 	logvalue "$forge_gitroot" \
 	error "Le répertoire '$forge_gitroot' est protégé en écriture." \
 	error "Contactez l'administrateur du projet $forge_project" \
@@ -556,7 +614,7 @@ if [ "$RET" != 0 ]; then
 	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot"
 	
     runtest \
-	name "Création du répertoire cible" \
+	name "Création du répertoire cible " \
 	logvalue "$forge_gitroot/$forge_subdir" \
 	error "Impossible de créer le répertoire '$forge_gitroot/$forge_subdir'" \
 	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$forge_subdir"
@@ -565,20 +623,20 @@ fi
 repo="$forge_gitroot/$forge_subdir/$name"
 
 runtest \
-	name "Vérification que le dépôt Git n'existe pas encore" \
+	name "Vérification que le dépôt Git n'existe pas encore " \
 	logvalue "$name" \
 	error "Le dépôt '$name' existe déjà" \
 	cmd ssh "$forge_login@$forge_hostname" test ! -d "$repo"
 
 runtest \
-	name "Création du dépôt Git" \
+	name "Création du dépôt Git " \
 	logvalue "$name" \
 	error "Impossible de créer le dépôt '$name'" \
 	cmd ssh "$forge_login@$forge_hostname" mkdir "$repo"
 
 RET=0
 runtest \
-	name "Initialisation du dépôt Git" \
+	name "Initialisation du dépôt Git " \
 	logvalue "$name" \
 	option "allow-fail" \
 	error "Impossible d'initialiser le dépôt '$name' à distance" \
@@ -590,14 +648,14 @@ if [ "$RET" != 0 ]; then
     REP="$(mktemp -d)"
     mkdir "$REP/$name"
     runtest \
-	name "Création du dépôt localement" \
+	name "Création du dépôt localement " \
 	logvalue "$REP/$name" \
 	option "allow-fail warn-only" \
 	error "Impossible d'initialiser le dépôt '$REP/$name'" \
 	cmd env GIT_DIR="$REP/$name" git init-db --shared
 
     runtest \
-	name "Transfert du dépôt git sur la forge" \
+	name "Transfert du dépôt git sur la forge " \
 	logvalue "$name" \
 	option "allow-fail" \
 	error "Impossible de transférer le dépôt '$REP/$name'" \
@@ -607,14 +665,14 @@ if [ "$RET" != 0 ]; then
 fi
 
 runtest \
-	name "Configuration de la description du dépôt Git" \
+	name "Configuration de la description du dépôt Git " \
 	logvalue "$name" \
 	error "Impossible de mettre en place la description du dépôt '$name'" \
 	input "$desc" \
 	cmd ssh "$forge_login@$forge_hostname" bash -c 'cat > "'"$repo/description"'"'
 
 runtest \
-	name "Installation du crochet pour l'accès HTTP" \
+	name "Installation du crochet pour l'accès HTTP " \
 	logvalue "post-update" \
 	option "allow-fail warn-only" \
 	error "Impossible de mettre en place le crochet 'post-update'" \
@@ -624,7 +682,7 @@ runtest \
 	|| true
 
 runtest \
-	name "Correction des permissions du crochet post-update" \
+	name "Correction des permissions du crochet post-update " \
 	logvalue "" \
 	error "Impossible de positionner les permissions du crochet 'post-update'" \
 	input "$desc" \
