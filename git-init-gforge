@@ -169,7 +169,7 @@ exec_options() {
 		10) next=$(( $next - 1 )) ;;
 		20) ;;
 		0) next=$(( $next + 1 ))
-		   if test $next = 6 -a $action = list ; then
+		   if test "$next" = 6 -a "$action" = list ; then
 		     next=$(( $next + 3 ))
 		   fi
 		   ;;
@@ -371,6 +371,17 @@ echo_setup() {
 
 }
 
+echo_args() {
+	local varname="$1"
+	local vartype="$2"
+	local text="$3"
+	eval local val='"$'"$varname"'"'
+	local motif="'"
+	local subst="'\\''"
+	printf " --%s='%s'" "${varname//_/-}" "${val//$motif/$subst}"
+
+}
+
 runtest() {
 	local name= logvalue= error= RET=0 options= input=
 	local out=
@@ -467,6 +478,7 @@ show_help() {
 	echo
 	echo "Sans option, le programme est interractif et propose des valeurs"
 	echo "par défaut raisonnables (en particulier pour écrire un papier)"
+	echo
 }
 
 #######################################################
@@ -550,6 +562,12 @@ else
 	clear
 
 fi
+
+echo "Pour réexécuter ce programme avec ces réglages sans interaction, utiliser :"
+printf "%s" "$0"
+exec_options echo_args
+echo
+echo
 
 runtest \
 	name "Tentative de connexion SSH à la forge " \
