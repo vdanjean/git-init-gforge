@@ -578,6 +578,20 @@ runtest \
 	error "Vérifiez les paramètres de connexion et vos clés SSH" \
 	cmd ssh "$forge_login@$forge_hostname" true
 
+if test "$dry_run" != 1 ; then
+    case "$forge_gitroot $forge_subdir" in
+    *'$HOME'*|*'${HOME}'*)
+	RHOME="$(ssh "$forge_login@$forge_hostname" echo '$HOME')"
+	motif='$HOME'
+	forge_gitroot="${forge_gitroot//$motif/$RHOME}"
+	forge_subdir="${forge_subdir//$motif/$RHOME}"
+	motif='${HOME}'
+	forge_gitroot="${forge_gitroot//$motif/$RHOME}"
+	forge_subdir="${forge_subdir//$motif/$RHOME}"
+    ;;
+    esac
+fi
+
 if [ $action = list ]; then
     runtest \
 	name "Vérification de la présence du répertoire racine des dépôts Git " \
