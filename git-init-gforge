@@ -614,6 +614,23 @@ runtest \
 	|| RET="$?"
 
 if [ "$RET" != 0 ]; then
+    if test "$forge_project" = "user" ; then
+	case "$forge_gitroot" in
+	*/public_git)
+	    forge_gitroot="${forge_gitroot%/public_git}"
+	    forge_subdir="public_git/$forge_subdir"
+	    ;;
+	*/public_git/)
+	    forge_gitroot="${forge_gitroot%/public_git/}"
+	    forge_subdir="public_git/$forge_subdir"
+	    ;;
+	public_git|public_git/)
+	    forge_gitroot="."
+	    forge_subdir="public_git/$forge_subdir"
+	    ;;
+	esac
+    fi
+
     runtest \
 	name "Vérification de la présence du répertoire racine des dépôts Git " \
 	logvalue "$forge_gitroot" \
@@ -708,6 +725,7 @@ runtest \
 
 echo 
 echo "Votre dépôt git est configuré"
+echo "#############################"
 echo "Pour le remplir depuis un projet Git local, tapez les commandes suivantes :"
 echo
 echo "# Ajout du dépôt de la forge sous le nom 'origin'"
@@ -719,4 +737,8 @@ echo "# Liaison entre la branche master locale et la branche master du dépôt"
 echo "# Ça permet de faire un simple 'git pull' par la suite"
 echo "git branch --set-upstream master origin/master"
 echo
-
+echo "#############################"
+echo "Pour le cloner, tapez :"
+echo
+echo "git clone git+ssh://$forge_login@$forge_hostname$repo"
+echo
