@@ -47,12 +47,208 @@ fi
 
 set -e
 
+cur_forge=
+list_forges=
+cur_project=
+
+forge_switch() { # hostname
+	cur_forge="$(echo "$1" | tr .- __)"
+	case " $list_forges  " in
+	*" $cur_forge "*) ;;
+	*) list_forges+=" $cur_forge" ;;
+	esac
+	project_switch ""
+}
+
+forge_set() { # var value
+	if [ "$cur_forge" = "" ]; then
+		echo 2>&1 "Internal error: no forge selected to set '$1' to '$2'"
+		exit 1
+	fi
+	eval "${cur_forge}_$1="'"$2"'
+}
+
+forge_get() { # var default
+	local val
+	if [ "$1" = --nocheck ]; then
+		shift
+	else
+		if [ "$cur_forge" = "" ]; then
+			echo 2>&1 "Internal error: no forge selected to get '$1'"
+			exit 1
+		fi
+	fi
+	eval 'val="$'"${cur_forge}_$1"'"'
+	echo "${val:-"$2"}"
+}
+
+forge_list() {
+	local list="$list_forges"
+	local i
+	local oldf="$cur_forge"
+	local oldp="$cur_project"
+	for i in $list ; do
+		forge_switch "$i"
+		echo "$(forge_get prio 50) $(forge_get hostname)"
+	done | sort -n | sed -e 's/^[0-9]\+ \+//'
+	cur_forge="$oldc"
+	cur_project="$oldp"
+}
+
+project_switch() { # projectname
+	if [ "$cur_forge" = "" -a "$1" != "" ]; then
+		echo 2>&1 "Internal error: no forge selected when selecting project '$1'"
+		exit 1
+	fi
+	cur_project="$(echo "$1" | tr .- __)"
+	local list_projects="$(forge_get projlist "")"
+	case " $list_projects  " in
+	*" $cur_project "*) ;;
+	*) echo "registering $cur_project in $cur_forge"
+	   forge_set projlist "$list_projects $cur_project" ;;
+	esac
+}
+
+project_set() { # var value
+	if [ "$cur_project" = "" ]; then
+		echo 2>&1 "Internal error: no project selected to set '$1' to '$2'"
+		exit 1
+	fi
+	eval "${cur_forge}_proj_${cur_project}_$1="'"$2"'
+}
+
+project_get() { # var default
+	local val
+	if [ "$1" = --nocheck ]; then
+		shift
+	else
+		if [ "$cur_project" = "" ]; then
+			echo 2>&1 "Internal error: no project selected to get '$1'"
+			exit 1
+		fi
+	fi
+	eval 'val="$'"${cur_forge}_proj_${cur_project}_$1"'"'
+	echo "${val:-"$2"}"
+}
+
+project_list() {
+	local list="$(forge_get projlist "")"
+	local i
+	local oldf="$cur_forge"
+	local oldp="$cur_project"
+	for i in $list ; do
+		project_switch "$i"
+		echo "$(project_get prio 50) $(project_get name)"
+	done | sort -n | sed -e 's/^[0-9]\+ \+//'
+	cur_forge="$oldc"
+	cur_project="$oldp"
+}
+
+declare_forge() {
+	local TEMP
+	TEMP=$(getopt -o '' --long hostname:,description:,priority:,projectsgitroot: \
+		-n "while creating forge" -- "$@")
+	eval set -- "$TEMP"
+	while [ "$#" != 0 ] ; do
+		case "$1" in
+		--hostname)
+			forge_switch "$2"
+			forge_set hostname "$2"
+			shift ;;
+		--description)
+			forge_set desc "$2"
+			shift ;;
+		--priority)
+			forge_set prio "$2"
+			shift ;;
+		--projectsgitroot)
+			forge_set proot "$2"
+			shift ;;
+		--) shift ; break ;;
+		*)
+			echo 1>&2 "Error while describing a forge: '$1'"
+			exit 1 ;;
+		esac
+		shift
+	done
+	TEMP=$(getopt -o '' --long projectname:,description:,priority: \
+		-n "while creating project for $(forge_get hostname)" -- "$@")
+	eval set -- "$TEMP"
+	while [ "$#" != 0 ] ; do
+		case "$1" in
+		--projectname)
+			project_switch "$2"
+			project_set name "$2"
+			shift ;;
+		--description)
+			project_set desc "$2"
+			shift ;;
+		--priority)
+			project_set prio "$2"
+			shift ;;
+		--)
+			shift
+			if [ "$#" = 0 ] ; then break ; fi
+			TEMP=$(getopt -o '' --long projectname:,description:,priority: \
+				 -n "creating project" -- "$@")
+			eval set -- "$TEMP"
+			project_switch ""
+			continue ;;
+		*)
+			echo 1>&2 "Error while describing a project: '$1'"
+			exit 1 ;;
+		esac
+		shift
+	done
+}
+
+declare_forge \
+  --hostname shell.gforge.inria.fr \
+  --desc "GForge Inria" \
+  --prio 20 \
+  --projectsgitroot /gitroot \
+  -- \
+    --project memo \
+    --desc "Memo (accès réservé aux membres du bâtiment de Montbonnot)" \
+    --prio 20 \
+  -- \
+    --project moais \
+    --desc "Moais (accès réservé aux membres de Moais + invités)" \
+    --prio 30 \
+  -- \
+    --project mescal \
+    --desc "Mescal (accès réservé aux membres de Mescal + invités)" \
+    --prio 30
+
+declare_forge \
+  --hostname shell.forge.imag.fr \
+  --desc "Forge IMAG" \
+  --prio 30 \
+  --projectsgitroot /scmrepos/git
+
+declare_forge \
+  --hostname ligforge.imag.fr \
+  --desc "LIG Forge (dépréciée)" \
+  --prio 70 \
+  --projectsgitroot /gitroot
+
+declare_forge \
+  --hostname git.debian.org \
+  --desc "Alioth Debian forge" \
+  --prio 40 \
+  --projectsgitroot /git \
+  -- \
+    --project collab-maint \
+    --desc "Projet collaboratif commun" \
+    --prio 30
+
 #######################################################
 exec_options() {
 	local next=1
 	local RET
 	local funcname="$1"
 	declare -a opts
+	local f p
 
 	exec_option() {
 		eval "$funcname" '"$@"'
@@ -69,17 +265,26 @@ exec_options() {
 			choice default "Créer un nouveau dépôt Git" create \
 			choice "" "Simuler la création d'un nouveau dépôt Git" simulate \
 		    || RET=$?  ;;	
-		2) exec_option forge_hostname \
+		2) opts=(
+		   )
+		   for f in $(forge_list) ; do
+			forge_switch "$f"
+			opts=( "${opts[@]}" \
+			  choice "" "$(forge_get desc "No description")" \
+			    "$(forge_get hostname "No hostname")" )
+		   done
+		   opts=( "${opts[@]}" \
+			choice "input nonnull" "Autre" "" )
+		   opts[1]="${opts[1]} default"
+		   exec_option forge_hostname \
 			string "Forge à utiliser" \
 			help "Indiquer le nom de la machine de la forge accessible par SSH" \
 			help "." \
-			help "Les forges INRIA, IMAG et LigForge sont pré-renseignées ici et" \
+			help "Quelques forges sont pré-renseignées ici et" \
 			help "proposent des réglages adaptés aux questions suivantes" \
-			choice default "GForge Inria" shell.gforge.inria.fr \
-			choice "" "Forge IMAG" shell.forge.imag.fr \
-			choice "" "LIG Forge (dépréciée)" ligforge.imag.fr \
-			choice "input nonnull" "Autre" "" \
-		    || RET=$?  ;;	
+			"${opts[@]}" \
+		    || RET=$?
+		    forge_switch "$forge_hostname" ;;	
 		3) exec_option forge_login \
 			string "Login à utiliser pour accéder à la forge" \
 			choice default "Current login" "$LOGNAME" \
@@ -88,43 +293,52 @@ exec_options() {
 		4) opts=(
 		     choice "" "Compte utilisateur (pas de rattachement à un projet particulier)" user \
 		   )
-		   case "$forge_hostname" in
-		   *gforge.inria.fr)
-		      opts=( "${opts[@]}" \
-			choice default "Memo (accès réservé aux membres du bâtiment de Montbonnot)" memo \
-			choice "" "Moais (accès réservé aux membres de Moais + invités)" moais \
-			choice "" "Mescal (accès réservé aux membres de Mescal + invités)" mescal \
-		      ) ;;
-		   esac
+		   if [ "$forge_hostname" != "" ]; then
+		     for p in $(project_list) ; do
+			project_switch "$p"
+			opts=( "${opts[@]}" \
+			  choice "" "$(project_get desc "No description")" \
+			    "$(project_get name "No name")" )
+		     done
+		   fi
+		   opts=( "${opts[@]}" \
+		     choice "input nonnull" "Autre" "" )
+		   opts[5]="${opts[5]} default"
 		   exec_option forge_project \
 			string "Nom du projet de la forge dans lequel créer le dépôt git" \
 			"${opts[@]}" \
-			choice "input nonnull" "Autre" "" \
-		    || RET=$?  ;;
+		    || RET=$?
+		   project_switch "$forge_project" ;;
 		5) opts=()
 		   case "$forge_project" in
 		   user)
 		     opts=(
 		       choice default "GitRoot du compte personnel" "\$HOME/public_git" \
 		     ) ;;
-		   *) case "$forge_hostname" in
-		      *.forge.imag.fr)
-			 opts=(
-			   choice default "GitRoot du projet choisi" "/scmrepos/git/$forge_project" \
-			 ) ;;
-		      *)
-			 opts=(
-			   choice default "GitRoot du projet choisi" "/gitroot/$forge_project" \
-			 ) ;;
-		      esac ;;
+		   *)
+		     p="$(forge_get --nocheck proot "")"
+		     f=""
+		     if [ "$p" = "" ]; then
+		       opts=( \
+			choice "" "GitRoot du projet choisi" "/scmrepos/git/$forge_project" \
+			choice "" "GitRoot du projet choisi" "/gitroot/$forge_project" \
+			choice "" "GitRoot du projet choisi" "/git/$forge_project" \
+		       )
+		       f="default"
+		     else
+		       opts=(
+		         choice default "GitRoot du projet choisi" "$p/$forge_project" \
+		       )
+		     fi
 		   esac
 		   exec_option forge_gitroot \
 			string "Chemin vers le répertoire racine des dépôts Git sur la forge" \
-			help "Pour les forges INRIA, IMAG et LigForge, le choix proposé par défaut" \
-			help "est correct. Pour les autres, il peut être utile de vérifier (mais ce" \
+			help "Pour les forges connues, le choix proposé par défaut" \
+			help "est correct. Pour les autres, une sélection classique vous est" \
+			help "proposée. Il peut être utile de vérifier (mais ce" \
 			help "programme vous indiquera plus tard s'il y a un problème)" \
 			"${opts[@]}" \
-			choice "input nonnull" "Autre" "" \
+			choice "input nonnull $f" "Autre" "" \
 		    || RET=$?  ;;
 		6) exec_option name \
 			string "Nom du dépôt Git à créer" \
@@ -196,7 +410,7 @@ display_all() {
 			echo "* $4: $3";
 			shift; shift; shift;;
 		*)
-			error problem;;
+			error "display_all: problem with '$1'";;
 		esac
 		shift
 	done
@@ -220,7 +434,7 @@ set_default() {
 			esac
 			shift; shift; shift;;
 		*)
-			error problem;;
+			error "set_default: problem with '$1'";;
 		esac
 		shift
 	done
@@ -287,7 +501,7 @@ run_dialog() {
 			count=$(($count + 1))
 			shift; shift; shift;;
 		*)
-			error problem;;
+			error "run_dialog: problem with '$1'";;
 		esac
 		shift
 	done
