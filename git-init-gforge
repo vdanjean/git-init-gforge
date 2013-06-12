@@ -884,7 +884,7 @@ if [ "$RET" != 0 ]; then
 	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$forge_subdir"
 fi
 
-repo="$forge_gitroot/$forge_subdir/$name"
+repo="$forge_gitroot/$forge_subdir${forge_subdir:+/}$name"
 
 runtest \
 	name "Vérification que le dépôt Git n'existe pas encore " \
