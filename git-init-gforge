@@ -563,7 +563,8 @@ run_dialog() {
 		return 20 ;;
 	2) dialog --title "$text" --ok-label "Retour" --msgbox "$help_txt" 0 0
 	   return 20 ;;
-	*) error argh ;;
+	127) error "dialog seems missing. Please, check if it is really available" ;;
+	*) error "argh:$RET" ;;
 	esac
 }
 
