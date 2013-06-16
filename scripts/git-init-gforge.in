@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-DATADIR="$(dirname "$0")/../share/git-init-gforge"
+DATADIR="@pkgdatadir@"
 
 #######################################################
 # LSB
