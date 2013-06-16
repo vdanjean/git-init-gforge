@@ -15,6 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+DATADIR="$(dirname "$0")/../share/git-init-gforge"
+
 #######################################################
 # LSB
 
@@ -146,7 +148,8 @@ project_list() {
 
 declare_forge() {
 	local TEMP
-	TEMP=$(getopt -o '' --long hostname:,description:,priority:,projectsgitroot: \
+	TEMP=$(getopt -o '' \
+	    --long hostname:,description:,priority:,projectsgitroot:,install-hooks: \
 		-n "while creating forge" -- "$@")
 	eval set -- "$TEMP"
 	while [ "$#" != 0 ] ; do
@@ -163,6 +166,9 @@ declare_forge() {
 			shift ;;
 		--projectsgitroot)
 			forge_set proot "$2"
+			shift ;;
+		--install-hooks)
+			forge_set install_hooks "$2"
 			shift ;;
 		--) shift ; break ;;
 		*)
@@ -201,46 +207,6 @@ declare_forge() {
 		shift
 	done
 }
-
-declare_forge \
-  --hostname shell.gforge.inria.fr \
-  --desc "GForge Inria" \
-  --prio 20 \
-  --projectsgitroot /gitroot \
-  -- \
-    --project memo \
-    --desc "Memo (accès réservé aux membres du bâtiment de Montbonnot)" \
-    --prio 20 \
-  -- \
-    --project moais \
-    --desc "Moais (accès réservé aux membres de Moais + invités)" \
-    --prio 30 \
-  -- \
-    --project mescal \
-    --desc "Mescal (accès réservé aux membres de Mescal + invités)" \
-    --prio 30
-
-declare_forge \
-  --hostname shell.forge.imag.fr \
-  --desc "Forge IMAG" \
-  --prio 30 \
-  --projectsgitroot /scmrepos/git
-
-declare_forge \
-  --hostname ligforge.imag.fr \
-  --desc "LIG Forge (dépréciée)" \
-  --prio 70 \
-  --projectsgitroot /gitroot
-
-declare_forge \
-  --hostname git.debian.org \
-  --desc "Alioth Debian forge" \
-  --prio 40 \
-  --projectsgitroot /git \
-  -- \
-    --project collab-maint \
-    --desc "Projet collaboratif commun" \
-    --prio 30
 
 #######################################################
 exec_options() {
@@ -597,8 +563,13 @@ echo_args() {
 
 }
 
+print_args() {
+    getopt -- "" -- "$@" | sed -e s'/^ -- //'
+}
+
 runtest() {
 	local name= logvalue= error= RET=0 options= input=
+	local output_var=
 	local out=
 	local dry_skip=
 	local dry_log=
@@ -617,6 +588,7 @@ runtest() {
 		error) error+="$2\n"; shift;;
 		input) input+="$2"; shift;;
 		option) options+="$2 "; shift;;
+		output-var) output_var="$2"; shift;;
 		cmd) shift ; break ;;
 		*) error pb ;;
 		esac
@@ -625,7 +597,7 @@ runtest() {
 	
 	$dry_log log_daemon_msg "$name" "$logvalue"
 	if [ "$dry_run" = 1 ]; then
-		echo "$@"
+		print_args "$@"
 		case " $options " in
 		*\ warn-only\ *) RET=255 ;;
 		esac
@@ -650,10 +622,11 @@ runtest() {
 			*\ silent\ *) ;;
 			*)
 				if [ -z "$input" ]; then
-					echo "CMD: $@"
+					printf "CMD: "
 				else
-					echo "CMD: echo \"$input\" | $@"
+					printf "%s" "CMD: echo \"$input\" | "
 				fi
+				print_args "$@"
 				echo "$out"
 				echo
 				echo "ERREUR :"
@@ -661,11 +634,14 @@ runtest() {
 				;;
 			esac
 		else
-			case " $options " in
+		    case " $options " in
 			*\ print\ *)
-				echo
-				echo "$out"
-			esac
+			    echo
+			    echo "$out" ;;
+		    esac
+		fi
+		if test -n "$output_var"; then
+		    eval $output_var='"$out"'
 		fi
 	fi
 	return $RET
@@ -697,6 +673,9 @@ show_help() {
 }
 
 #######################################################
+for forge in "$DATADIR/forges/"*.sh ; do
+    source "$forge"
+done
 
 dry_run=
 debug=
@@ -784,6 +763,10 @@ exec_options echo_args
 echo
 echo
 
+declare -a SSH_CMD
+SSH_CMD=( ssh -x -a "$forge_login@$forge_hostname" )
+eval "$(forge_get install_hooks :)"
+
 runtest \
 	name "Tentative de connexion SSH à la forge " \
 	logvalue "$forge_hostname" \
@@ -791,7 +774,7 @@ runtest \
 	error "login : $forge_login" \
 	error "machine : $forge_hostname" \
 	error "Vérifiez les paramètres de connexion et vos clés SSH" \
-	cmd ssh "$forge_login@$forge_hostname" true
+	cmd "${SSH_CMD[@]}" true
 
 if test "$dry_run" != 1 ; then
     case "$forge_gitroot $forge_subdir" in
@@ -814,13 +797,13 @@ if [ $action = list ]; then
 	error "Le répertoire '$forge_gitroot' n'existe pas." \
 	error "Contactez l'administrateur du projet $forge_project" \
 	error "ou configurez un autre répertoire de base" \
-	cmd ssh "$forge_login@$forge_hostname" test -d "$forge_gitroot"
+	cmd "${SSH_CMD[@]}" test -d "$forge_gitroot"
 
     runtest \
 	name "Liste des dépôts git disponibles dans " \
 	logvalue "$forge_gitroot" \
 	option "print" \
-	cmd ssh "$forge_login@$forge_hostname" find "$forge_gitroot" -type d -name *.git \
+	cmd "${SSH_CMD[@]}" find "$forge_gitroot" -type d -name *.git \
 		-printf "'\n%p\n'" -exec sed "'s/^/  /'" {}/description '\;' -prune
 
     echo
@@ -834,79 +817,108 @@ if [ $action = list ]; then
     exit 0
 fi
 
+forge_dest="$forge_gitroot${forge_subdir:+/$forge_subdir}"
 RET=0
 runtest \
 	name "Vérification de la disponibilité du répertoire cible " \
-	logvalue "$forge_gitroot/$forge_subdir/." \
+	logvalue "$forge_dest/." \
 	option "allow-fail warn-only" \
-	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot/$forge_subdir/." \
+	cmd "${SSH_CMD[@]}" test -w "$forge_dest/." \
 	|| RET="$?"
 
 if [ "$RET" != 0 ]; then
-    if test "$forge_project" = "user" ; then
-	case "$forge_gitroot" in
-	*/public_git)
-	    forge_gitroot="${forge_gitroot%/public_git}"
-	    forge_subdir="public_git/$forge_subdir"
-	    ;;
-	*/public_git/)
-	    forge_gitroot="${forge_gitroot%/public_git/}"
-	    forge_subdir="public_git/$forge_subdir"
-	    ;;
-	public_git|public_git/)
-	    forge_gitroot="."
-	    forge_subdir="public_git/$forge_subdir"
-	    ;;
-	esac
-    fi
+    runtest \
+	name "Récupération du dernier répertoire parent existant" \
+	output-var last_dir \
+	cmd "${SSH_CMD[@]}" bash -c ': ; rep="'"$forge_dest"'" ; while ! test -d "$rep" ; do rep="$(dirname "$rep")" ; done ; echo "$rep"'
 
     runtest \
-	name "Vérification de la présence du répertoire racine des dépôts Git " \
-	logvalue "$forge_gitroot" \
-	error "Le répertoire '$forge_gitroot' n'existe pas." \
-	error "Contactez l'administrateur du projet $forge_project" \
-	error "ou configurez un autre répertoire de base" \
-	cmd ssh "$forge_login@$forge_hostname" test -d "$forge_gitroot"
-	
-    runtest \
-	name "Test d'écriture dans le répertoire racine des dépôts Git " \
-	logvalue "$forge_gitroot" \
-	error "Le répertoire '$forge_gitroot' est protégé en écriture." \
-	error "Contactez l'administrateur du projet $forge_project" \
-	error "pour être inclus dans le projet $forge_project" \
-	error "ou configurez un autre répertoire de base" \
-	cmd ssh "$forge_login@$forge_hostname" test -w "$forge_gitroot"
-	
+	name "Test d'écriture dans le répertoire parent existant " \
+	logvalue "$last_dir" \
+	error "Le répertoire '$last_dir' est protégé en écriture." \
+	error "Les causes classiques de cette erreurs sont" \
+	error "la non inclusion dans le projet $forge_project," \
+	error "une erreur dans le nom des répertoires ou du projet" \
+	error "ou des permissions erronées pour le répertoire" \
+	cmd "${SSH_CMD[@]}" test -w "$last_dir"
+    
     runtest \
 	name "Création du répertoire cible " \
-	logvalue "$forge_gitroot/$forge_subdir" \
-	error "Impossible de créer le répertoire '$forge_gitroot/$forge_subdir'" \
-	cmd ssh "$forge_login@$forge_hostname" mkdir -p "$forge_gitroot/$forge_subdir"
+	logvalue "$forge_dest with mode $last_dir_mode" \
+	error "Impossible de créer le répertoire '$forge_dest'" \
+	cmd "${SSH_CMD[@]}" mkdir -p "$forge_dest"
+else
+    last_dir="$forge_dest"
 fi
 
-repo="$forge_gitroot/$forge_subdir${forge_subdir:+/}$name"
+repo="$forge_dest/$name"
 
 runtest \
 	name "Vérification que le dépôt Git n'existe pas encore " \
 	logvalue "$name" \
 	error "Le dépôt '$name' existe déjà" \
-	cmd ssh "$forge_login@$forge_hostname" test ! -d "$repo"
+	cmd "${SSH_CMD[@]}" test ! -d "$repo"
 
 runtest \
 	name "Création du dépôt Git " \
 	logvalue "$name" \
 	error "Impossible de créer le dépôt '$name'" \
-	cmd ssh "$forge_login@$forge_hostname" mkdir "$repo"
+	cmd "${SSH_CMD[@]}" mkdir "$repo"
 
-RET=0
 runtest \
+	name "Récupération du mode du dernier répertoire existant" \
+	logvalue "$last_dir" \
+	output-var last_dir_mode \
+	cmd "${SSH_CMD[@]}" stat -c "%a" "$last_dir"
+
+runtest \
+	name "Récupération du groupe du dernier répertoire existant " \
+        logvalue "$last_dir" \
+	output-var last_dir_group \
+	cmd "${SSH_CMD[@]}" stat -c "%g" "$last_dir"
+
+runtest \
+	name "Récupération du groupe principal de l'utilisateur courant" \
+	output-var user_group \
+	cmd "${SSH_CMD[@]}" id -g
+
+created_dir="$repo"
+prev_dir="$(dirname "$created_dir")"
+while [ "$prev_dir" != "$last_dir" -a "$created_dir" != "/" ]; do
+    created_dir="$prev_dir"
+    prev_dir="$(dirname "$created_dir")"
+done
+if [ "$created_dir" = "/" ]; then
+    # BUG...
+    created_dir="$repo"
+fi
+if [ "$user_group" != "$last_dir_group" ]; then
+    runtest \
+	name "Recopie récursive du groupe du répertoire parent " \
+	logvalue "$created_dir ($last_dir_group)" \
+	option "allow-fail warn-only" \
+	cmd "${SSH_CMD[@]}" chgrp -R "$last_dir_group" "$created_dir"
+fi
+runtest \
+	name "Recopie récursive du mode du répertoire parent " \
+	logvalue "$created_dir ($last_dir_mode)" \
+	option "allow-fail warn-only" \
+	cmd "${SSH_CMD[@]}" chmod -R "$last_dir_mode" "$created_dir"
+
+if [ "$CREATE_LOCAL" = 1 ]; then
+    RET=1
+else
+    RET=0
+    runtest \
 	name "Initialisation du dépôt Git " \
 	logvalue "$name" \
 	option "allow-fail" \
 	error "Impossible d'initialiser le dépôt '$name' à distance" \
 	error "On va essayer de le faire localement puis de le transférer" \
-	cmd ssh "$forge_login@$forge_hostname" env GIT_DIR="$repo" git init-db --shared \
+	cmd "${SSH_CMD[@]}" env GIT_DIR="$repo" git init-db --shared \
 	|| RET="$?"
+fi
+
 if [ "$RET" != 0 ]; then
     RET=0
     REP="$(mktemp -d)"
@@ -933,7 +945,7 @@ runtest \
 	logvalue "$name" \
 	error "Impossible de mettre en place la description du dépôt '$name'" \
 	input "$desc" \
-	cmd ssh "$forge_login@$forge_hostname" bash -c 'cat > "'"$repo/description"'"'
+	cmd "${SSH_CMD[@]}" bash -c 'cat > "'"$repo/description"'"'
 
 runtest \
 	name "Installation du crochet pour l'accès HTTP " \
@@ -942,7 +954,7 @@ runtest \
 	error "Impossible de mettre en place le crochet 'post-update'" \
 	error "On suppose qu'il est déjà correctement nommé" \
 	input "$desc" \
-	cmd ssh "$forge_login@$forge_hostname" mv "$repo/hooks/post-update".sample "$repo/hooks/post-update" \
+	cmd "${SSH_CMD[@]}" mv "$repo/hooks/post-update".sample "$repo/hooks/post-update" \
 	|| true
 
 runtest \
@@ -950,7 +962,7 @@ runtest \
 	logvalue "" \
 	error "Impossible de positionner les permissions du crochet 'post-update'" \
 	input "$desc" \
-	cmd ssh "$forge_login@$forge_hostname" chmod +x "$repo/hooks/post-update"
+	cmd "${SSH_CMD[@]}" chmod +x "$repo/hooks/post-update"
 
 echo 
 echo "Votre dépôt git est configuré"
