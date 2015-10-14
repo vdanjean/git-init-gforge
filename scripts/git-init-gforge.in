@@ -614,10 +614,11 @@ runtest() {
 		if test "$RET" != 0; then
 			case " $options " in
 			*\ allow-fail\ *)
-				if ! test -z "$error"; then
+				if ! test -z "$out"; then
+					echo -e "$out"
 					echo
-					echo -e "$error"
 				fi
+				RET=0
 				;;
 			*\ silent\ *) ;;
 			*)
