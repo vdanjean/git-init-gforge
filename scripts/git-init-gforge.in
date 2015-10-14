@@ -830,7 +830,7 @@ if [ "$RET" != 0 ]; then
     runtest \
 	name "Récupération du dernier répertoire parent existant" \
 	output-var last_dir \
-	cmd "${SSH_CMD[@]}" bash -c ': ; rep="'"$forge_dest"'" ; while ! test -d "$rep" ; do rep="$(dirname "$rep")" ; done ; echo "$rep"'
+	cmd "${SSH_CMD[@]}" bash -c "'"': ; rep="'"$forge_dest"'" ; while ! test -d "$rep" ; do rep="$(dirname "$rep")" ; done ; echo "$rep"'"'"
 
     runtest \
 	name "Test d'écriture dans le répertoire parent existant " \
@@ -973,10 +973,8 @@ echo "# Ajout du dépôt de la forge sous le nom 'origin'"
 echo "# (dépôt par défault pour les push/pull)"
 echo "git remote add origin ssh://$forge_login@$forge_hostname$repo"
 echo "# On envoie la branche locale 'master' sur la forge"
-echo "git push origin master:master"
-echo "# Liaison entre la branche master locale et la branche master du dépôt"
-echo "# Ça permet de faire un simple 'git pull' par la suite"
-echo "git branch --set-upstream master origin/master"
+echo "# en faisant la liaison pour pouvoir faire juste 'git pull' par la suite"
+echo "git push --set-upstream origin master"
 echo
 echo "#############################"
 echo "Pour le cloner, tapez :"
